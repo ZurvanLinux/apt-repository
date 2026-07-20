@@ -1,0 +1,127 @@
+name: Publish APT repository
+
+# Regenerates and signs the APT indices whenever a .deb lands in pool/, or on
+# manual dispatch. Generated files under dists/ are committed back to main so
+# GitHub Pages (classic, serving the repo root at repo.zurvanlinux.org) serves
+# them verbatim. No index state is committed by hand.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'pool/**'
+
+permissions:
+  contents: write   # commit + push generated indices back to main
+
+concurrency:
+  group: publish-apt
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Regenerate + sign APT indices
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    container:
+      # Pinned by digest for reproducibility (same image the ISO builder uses).
+      image: debian:trixie@sha256:d63a99144861e4e460196ed93d07777490cbeab53ca660c434f2a589a6c50ea3
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install repository tools
+        run: |
+          set -eux
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install -y --no-install-recommends dpkg-dev apt-utils gzip gnupg ca-certificates
+
+      - name: Regenerate indices (Packages, Packages.gz, Release)
+        run: |
+          set -eux
+          cd "$GITHUB_WORKSPACE"
+          mkdir -p dists/zurvan/main/binary-amd64
+          # Flat layout: pool/ at repo root. dpkg-scanpackages emits Filename
+          # values relative to the repo root (e.g. "pool/foo.deb"), which is the
+          # correct consumer-relative path on the Pages site.
+          dpkg-scanpackages --arch amd64 --multiversion pool/ > dists/zurvan/main/binary-amd64/Packages
+          gzip -9cnf dists/zurvan/main/binary-amd64/Packages > dists/zurvan/main/binary-amd64/Packages.gz
+          # Release auto-includes checksums for every file under dists/zurvan.
+          apt-ftparchive -c apt-ftparchive.conf release dists/zurvan > dists/zurvan/Release
+          echo "===== Release (head) ====="
+          head -25 dists/zurvan/Release
+
+      - name: Import signing subkey
+        id: key
+        env:
+          APT_SIGNING_SUBKEY: ${{ secrets.APT_SIGNING_SUBKEY }}
+        run: |
+          set -eux
+          if [ -z "$APT_SIGNING_SUBKEY" ]; then
+            echo "::error::APT_SIGNING_SUBKEY secret is not set. Complete P0 (generate the 4096-bit primary key offline, derive a signing-only subkey, and add APT_SIGNING_SUBKEY + APT_SIGNING_PASSPHRASE to this repo's secrets) before this workflow can sign Release files."
+            exit 1
+          fi
+          mkdir -p ~/.gnupg && chmod 700 ~/.gnupg
+          printf '%s\n' "$APT_SIGNING_SUBKEY" | gpg --batch --import
+          KEYID=$(gpg --batch --list-secret-keys --with-colons 2>/dev/null \
+                  | awk -F: '/^ssb/{print $5; exit}')
+          if [ -z "$KEYID" ]; then
+            KEYID=$(gpg --batch --list-secret-keys --with-colons 2>/dev/null \
+                    | awk -F: '/^sec/{print $5; exit}')
+          fi
+          echo "Imported signing key: $KEYID"
+          echo "keyid=$KEYID" >> "$GITHUB_OUTPUT"
+          echo "allow-loopback-pinentry" >> ~/.gnupg/gpg-agent.conf || true
+
+      - name: Sign Release (Release.gpg + InRelease)
+        env:
+          APT_SIGNING_PASSPHRASE: ${{ secrets.APT_SIGNING_PASSPHRASE }}
+          KEYID: ${{ steps.key.outputs.keyid }}
+        run: |
+          set -eux
+          cd "$GITHUB_WORKSPACE"
+          rm -f dists/zurvan/Release.gpg dists/zurvan/InRelease
+          # Detached signature -> Release.gpg
+          gpg --batch --yes --local-user "$KEYID" \
+              --pinentry-mode loopback --passphrase "$APT_SIGNING_PASSPHRASE" \
+              --detach-sign --armor -o dists/zurvan/Release.gpg dists/zurvan/Release
+          # Clear-signed -> InRelease
+          gpg --batch --yes --local-user "$KEYID" \
+              --pinentry-mode loopback --passphrase "$APT_SIGNING_PASSPHRASE" \
+              --clearsign -o dists/zurvan/InRelease dists/zurvan/Release
+          # Self-verify before publishing.
+          gpg --verify dists/zurvan/Release.gpg dists/zurvan/Release
+          gpg --verify dists/zurvan/InRelease
+
+      - name: Strip signing subkey (best-effort, always)
+        if: always()
+        env:
+          KEYID: ${{ steps.key.outputs.keyid }}
+        run: |
+          set +e
+          if [ -n "$KEYID" ]; then
+            gpg --batch --yes --delete-secret-and-public-key --force "$KEYID" 2>/dev/null
+          fi
+          rm -rf ~/.gnupg
+          exit 0
+
+      - name: Commit generated indices back to main
+        run: |
+          set -eux
+          cd "$GITHUB_WORKSPACE"
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          mkdir -p pool && touch pool/.gitkeep
+          git add dists pool/.gitkeep
+          if git diff --cached --quiet; then
+            echo "No index changes to commit."
+            exit 0
+          fi
+          git commit -m "chore(repo): regenerate APT indices [skip ci]
+
+          Generated by publish-repo.yml from pool/.
+          Signed: dists/zurvan/Release.gpg, dists/zurvan/InRelease"
+          git push

@@ -1,0 +1,4 @@
+# Flat Debian APT repository layout.
+# Committed .deb files live here; the publish workflow (publish-repo.yml)
+# regenerates the indices in dists/zurvan/ from this directory.
+# An empty pool is a valid signed skeleton (Phase 1 M1.2).
