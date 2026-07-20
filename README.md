@@ -28,7 +28,7 @@ Packages/Release state edited by hand.
 
 ## Consumer install
 
-On a Debian 13 (trixie) system:
+On a Debian Stable system:
 
 ```sh
 # 1. Install the signing key into the modern keyring location.
