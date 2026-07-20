@@ -1,0 +1,3 @@
+# Disable Jekyll on GitHub Pages so all repository files (including any that
+# begin with underscore or would be filtered) are served verbatim. The APT
+# client fetches raw paths like /dists/zurvan/InRelease and /pool/*.deb.
