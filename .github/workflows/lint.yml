@@ -1,0 +1,14 @@
+name: Lint
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: shellcheck + yamllint (reusable)
+    uses: ZurvanLinux/.github/.github/workflows/lint.yml@main
