@@ -115,11 +115,23 @@ jobs:
           exit 0
 
       - name: Commit generated indices back to main
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -eux
           cd "$GITHUB_WORKSPACE"
+          # In the container, .git may be missing or unsafe. Re-init if needed.
+          git config --global --add safe.directory '*'
+          if [ ! -d .git ]; then
+            git init -b main
+            git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+            git fetch --depth 1 origin main
+            git checkout -f main
+          fi
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # Ensure push uses token auth.
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           mkdir -p pool && touch pool/.gitkeep
           git add dists pool/.gitkeep
           if git diff --cached --quiet; then
