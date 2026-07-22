@@ -29,6 +29,13 @@ jobs:
       image: debian:trixie@sha256:d63a99144861e4e460196ed93d07777490cbeab53ca660c434f2a589a6c50ea3
 
     steps:
+      - name: Install git (needed before checkout for .git directory in container)
+        run: |
+          set -eux
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install -y --no-install-recommends git ca-certificates
+
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -36,8 +43,7 @@ jobs:
         run: |
           set -eux
           export DEBIAN_FRONTEND=noninteractive
-          apt-get update
-          apt-get install -y --no-install-recommends dpkg-dev apt-utils gzip gnupg ca-certificates git
+          apt-get install -y --no-install-recommends dpkg-dev apt-utils gzip gnupg
 
       - name: Regenerate indices (Packages, Packages.gz, Release)
         run: |
