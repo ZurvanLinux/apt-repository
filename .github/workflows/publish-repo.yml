@@ -37,7 +37,7 @@ jobs:
           set -eux
           export DEBIAN_FRONTEND=noninteractive
           apt-get update
-          apt-get install -y --no-install-recommends dpkg-dev apt-utils gzip gnupg ca-certificates
+          apt-get install -y --no-install-recommends dpkg-dev apt-utils gzip gnupg ca-certificates git
 
       - name: Regenerate indices (Packages, Packages.gz, Release)
         run: |
