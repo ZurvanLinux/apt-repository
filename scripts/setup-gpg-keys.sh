@@ -4,74 +4,71 @@ set -euo pipefail
 KEY_NAME="Zurvan Linux Archive"
 KEY_EMAIL="archive@zurvanlinux.org"
 KEY_LENGTH=4096
+BATCH_FILE="/tmp/gpg-batch-$$"
+PASSPHRASE_FILE="/tmp/zurvan-gpg-passphrase.txt"
+
+cleanup() {
+  rm -f "${BATCH_FILE}"
+}
+trap cleanup EXIT
 
 if gpg --list-keys "${KEY_EMAIL}" >/dev/null 2>&1; then
   FPR=$(gpg --list-keys --with-colons "${KEY_EMAIL}" | awk -F: '/^pub:/ {print $10; exit}')
   echo "ERROR: A key for ${KEY_EMAIL} already exists in this keyring."
-  echo "       Aborting to avoid overwriting.  Remove it first if intended:"
+  echo "       Aborting to avoid overwriting.  Remove it first:"
   echo "         gpg --batch --yes --delete-secret-keys ${FPR}"
   echo "         gpg --batch --yes --delete-keys ${FPR}"
   exit 1
 fi
 
-cat > /tmp/gpg-batch-primary-$$ <<EOF
-%no-protection
+SUBKEY_PASSPHRASE=$(openssl rand -base64 32 | tr -d '\n')
+
+echo "[*] Generating passphrase ..."
+echo "    ${SUBKEY_PASSPHRASE}"
+
+cat > "${BATCH_FILE}" <<EOF
+%echo Generating Zurvan Linux Archive key pair
 Key-Type: RSA
 Key-Length: ${KEY_LENGTH}
+Subkey-Type: RSA
+Subkey-Length: ${KEY_LENGTH}
+Subkey-Usage: sign
 Name-Real: ${KEY_NAME}
 Name-Email: ${KEY_EMAIL}
 Expire-Date: 0
+Passphrase: ${SUBKEY_PASSPHRASE}
 %commit
+%echo done
 EOF
 
-echo "[*] Generating offline 4096-bit RSA primary key for ${KEY_EMAIL} ..."
-gpg --batch --gen-key /tmp/gpg-batch-primary-$$
+echo "[*] Generating offline ${KEY_LENGTH}-bit RSA primary key + signing subkey ..."
+gpg --batch --gen-key "${BATCH_FILE}"
 
 PRIMARY_KEYID=$(gpg --list-keys --with-colons "${KEY_EMAIL}" | awk -F: '/^pub:/ {print $5; exit}')
+SUBKEY_KEYID=$(gpg --list-keys --with-colons "${KEY_EMAIL}" | awk -F: '/^sub:/ {print $5; exit}')
 echo "=== Primary key: ${PRIMARY_KEYID} ==="
-
-cat > /tmp/gpg-addkey-$$.exp <<EOF
-#!/usr/bin/env expect -f
-set timeout 30
-set keyid [lindex \$argv 0]
-spawn gpg --pinentry-mode loopback --passphrase '' --edit-key \$keyid
-expect "gpg> "
-send "addkey\r"
-expect "keyt"
-send "4\r"
-expect "keys"
-send "${KEY_LENGTH}\r"
-expect "expire"
-send "0\r"
-expect "y/N"
-send "y\r"
-expect "y/N"
-send "y\r"
-expect "gpg> "
-send "save\r"
-expect eof
-EOF
-chmod +x /tmp/gpg-addkey-$$.exp
-
-echo "[*] Adding signing-only subkey ..."
-/tmp/gpg-addkey-$$.exp "${PRIMARY_KEYID}"
-
-SUBKEY_FPR=$(gpg --list-keys --with-colons "${KEY_EMAIL}" | awk -F: '/^sub:/ {print $5; exit}')
-echo "=== Signing subkey fingerprint: ${SUBKEY_FPR} ==="
+echo "=== Signing subkey: ${SUBKEY_KEYID} ==="
 
 OUT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+PUB_FILE="${OUT_DIR}/public.key"
+SEC_FILE="${OUT_DIR}/secret-subkey.asc"
 
-echo "[*] Exporting public key -> ${OUT_DIR}/public.key"
-gpg --armor --export "${KEY_EMAIL}" > "${OUT_DIR}/public.key"
+echo "[*] Exporting public key -> ${PUB_FILE}"
+gpg --armor --export "${KEY_EMAIL}" > "${PUB_FILE}"
 
-echo "[*] Exporting secret subkey -> ${OUT_DIR}/secret-subkey.asc"
-gpg --armor --export-secret-subkeys "${PRIMARY_KEYID}" > "${OUT_DIR}/secret-subkey.asc" || true
-if [[ ! -s "${OUT_DIR}/secret-subkey.asc" ]]; then
+echo "[*] Exporting secret subkey -> ${SEC_FILE}"
+gpg --pinentry-mode loopback --passphrase "${SUBKEY_PASSPHRASE}" \
+  --armor --export-secret-subkeys "${PRIMARY_KEYID}" > "${SEC_FILE}" || true
+if [[ ! -s "${SEC_FILE}" ]]; then
   echo "ERROR: Failed to export secret subkey." >&2
   exit 1
 fi
 
-chmod 600 "${OUT_DIR}/public.key" "${OUT_DIR}/secret-subkey.asc"
+chmod 600 "${PUB_FILE}" "${SEC_FILE}"
+
+echo "[*] Saving passphrase -> ${PASSPHRASE_FILE}"
+echo "${SUBKEY_PASSPHRASE}" > "${PASSPHRASE_FILE}"
+chmod 600 "${PASSPHRASE_FILE}"
 
 cat <<EOF
 
@@ -80,33 +77,28 @@ cat <<EOF
 =============================================================
 
   Primary key (OFFLINE):    ${PRIMARY_KEYID}
-  Signing subkey:           ${SUBKEY_FPR}
-  Public key:               ${OUT_DIR}/public.key
-  Secret subkey:            ${OUT_DIR}/secret-subkey.asc
+  Signing subkey:           ${SUBKEY_KEYID}
+  Subkey passphrase:        ${SUBKEY_PASSPHRASE}
+  Public key:               ${PUB_FILE}
+  Secret subkey:            ${SEC_FILE}
+  Passphrase file:          ${PASSPHRASE_FILE}
 
-NEXT STEPS (per apt-repository/README.md):
+GITHUB ACTIONS SECRETS (apt-repository repo)
+--------------------------------------------
+  APT_SIGNING_SUBKEY:       contents of secret-subkey.asc
+  APT_SIGNING_PASSPHRASE:   ${SUBKEY_PASSPHRASE}
+
+NEXT STEPS:
 ----------------------------------------
-1. Move ONLY ${OUT_DIR}/public.key and ${OUT_DIR}/secret-subkey.asc
-   to your secure workstation.
+1. Commit public.key to apt-repository repo root if not already done.
 
-2. Commit public.key to the apt-repository repository root:
-       git add public.key && git commit -m "chore(apt): add APT repo signing public key"
+2. Add the two secrets above in GitHub:
+   Settings -> Secrets and variables -> Actions -> New repository secret
 
-3. In GitHub, add these secrets to the apt-repository repo:
-       Settings -> Secrets and variables -> Actions -> New repository secret
-
-   Name:  APT_SIGNING_SUBKEY
-   Value: contents of secret-subkey.asc  (the whole armored block)
-
-   Name:  APT_SIGNING_PASSPHRASE
-   Value: leave blank / unset unless the exported subkey is passphrase-protected
-          (the publish-repo.yml worklow invokes gpg with --pinentry-mode loopback
-           and APT_SIGNING_PASSPHRASE at signing time).
+3. After storing secrets, delete the temporary files:
+       rm -f ${PASSPHRASE_FILE}
+       rm -f ${SEC_FILE}
 
 4. Keep the primary key offline / air-gapped permanently.
-   If the subkey leaks, revoke it from the offline primary key and
-   generate a new signing subkey.
-
-5. Re-run .github/workflows/publish-repo.yml to verify signing works.
 =============================================================
 EOF
