@@ -1,0 +1,24 @@
+Architectures: amd64
+Codename: zurvan
+Components: main
+Date: Wed, 22 Jul 2026 13:48:16 +0000
+Description: Zurvan Linux custom APT repository (signed-by https://repo.zurvanlinux.org/public.key)
+Label: Zurvan Linux
+Origin: Zurvan Linux
+Suite: zurvan
+MD5Sum:
+ e71173f6e99ee49c4f55f7918b98a195              248 Release
+ d41d8cd98f00b204e9800998ecf8427e                0 main/binary-amd64/Packages
+ 4a4dd3598707603b3f76a2378a4504aa               20 main/binary-amd64/Packages.gz
+SHA1:
+ c95de5ad42a9480cec872aac6e0e5edc534c1b84              248 Release
+ da39a3ee5e6b4b0d3255bfef95601890afd80709                0 main/binary-amd64/Packages
+ a0fddd5458378c1bf3c10dd2f5c060d1347741ed               20 main/binary-amd64/Packages.gz
+SHA256:
+ 3422edefcbb3bab22af4432dd03b464fbce54aba303885af3ccc86d7cc258ad0              248 Release
+ e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855                0 main/binary-amd64/Packages
+ f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec               20 main/binary-amd64/Packages.gz
+SHA512:
+ ef4de72ef1e053d9815627a799f5879a99f8ad97fb96c1d9fa6aca8b41989a6ce06f0f26d62f555cf835d2a7e74cec615b1adb86e3f5cbef9b6105ea22c03752              248 Release
+ cf83e1357eefb8bdf1542850d66d8007d620e4050b5715dc83f4a921d36ce9ce47d0d13c5d85f2b0ff8318d2877eec2f63b931bd47417a81a538327af927da3e                0 main/binary-amd64/Packages
+ 1b46b9b08d5b338be9d732a1724795b2eab63daffde377218727c90857b79fe6a47bceed495117fcde60f7339812ef75ef4c69f82dd79fb69b6cbf8006b521f2               20 main/binary-amd64/Packages.gz
